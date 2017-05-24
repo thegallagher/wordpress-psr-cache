@@ -1,0 +1,18 @@
+{
+    "name": "thegallagher/wordpress-psr-cache",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "David Gallagher",
+            "email": "david@thegallagher.net"
+        }
+    ],
+    "require": {
+        "psr/simple-cache": "^1.0",
+        "psr/cache": "^1.0"
+    },
+    "require-dev": {
+        "johnpbloch/wordpress-core": "^4.7"
+    }
+}
