@@ -14,5 +14,10 @@
     },
     "require-dev": {
         "johnpbloch/wordpress-core": "^4.7"
+    },
+    "autoload": {
+        "psr-4": {
+            "TheGallagher\\WordPressPsrCache\\": "src/"
+        }
     }
 }

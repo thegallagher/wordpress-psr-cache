@@ -2,16 +2,56 @@
 
 namespace TheGallagher\WordPressPsrCache;
 
-use DateInterval;
-use DateTimeImmutable;
 use Psr\SimpleCache\CacheInterface;
-use Traversable;
+use Psr\Cache\CacheItemPoolInterface;
 
 /**
- * Simple Cache (PSR-16) Implementation for WordPress
+ * Simple Cache (PSR-16) implementation which proxies a PSR-6 CacheItemPoolInterface
  */
-class WordPressSimpleCache implements CacheInterface
+class SimpleCache implements CacheInterface
 {
+    /**
+     * The cache item pool proxied by this object
+     *
+     * @var CacheItemPoolInterface
+     */
+    protected $cacheItemPool;
+
+    /**
+     * SimpleCache constructor.
+     *
+     * @param CacheItemPoolInterface|null $cacheItemPool
+     */
+    public function __construct(CacheItemPoolInterface $cacheItemPool = null)
+    {
+        $this->setCacheItemPool($cacheItemPool);
+    }
+
+    /**
+     * Get the cache item pool proxied by this object
+     *
+     * @return CacheItemPoolInterface
+     */
+    public function getCacheItemPool()
+    {
+        return $this->cacheItemPool;
+    }
+
+    /**
+     * Set the cache item pool proxied by this object
+     *
+     * Defaults to TheGallagher\WordPressPsrCache\CacheItemPool
+     *
+     * @param CacheItemPoolInterface|null $cacheItemPool
+     */
+    public function setCacheItemPool(CacheItemPoolInterface $cacheItemPool = null)
+    {
+        if ($cacheItemPool === null) {
+            $cacheItemPool = new CacheItemPool();
+        }
+        $this->cacheItemPool = $cacheItemPool;
+    }
+
     /**
      * Fetches a value from the cache.
      *
@@ -25,9 +65,8 @@ class WordPressSimpleCache implements CacheInterface
      */
     public function get($key, $default = null)
     {
-        $this->validateKey($key);
-        $value = get_site_transient($key);
-        return $value === false ? $default : $value;
+        $item = $this->getCacheItemPool()->getItem($key);
+        return $item->isHit() ? $item->get() : $default;
     }
 
     /**
@@ -35,7 +74,7 @@ class WordPressSimpleCache implements CacheInterface
      *
      * @param string $key The key of the item to store.
      * @param mixed $value The value of the item to store, must be serializable.
-     * @param null|int|DateInterval $ttl Optional. The TTL value of this item. If no value is sent and
+     * @param null|int|\DateInterval $ttl Optional. The TTL value of this item. If no value is sent and
      *                                     the driver supports TTL then the library may set a default value
      *                                     for it or let the driver take care of that.
      *
@@ -46,16 +85,11 @@ class WordPressSimpleCache implements CacheInterface
      */
     public function set($key, $value, $ttl = null)
     {
-        $this->validateKey($key);
-        if ($ttl instanceof DateInterval) {
-            $now = new DateTimeImmutable();
-            $future = $now->add($ttl);
-            $ttl = $future->getTimestamp() - $now->getTimestamp();
-        }
-        if ($ttl === null) {
-            $ttl = 0;
-        }
-        return set_site_transient($key, $value, $ttl);
+        $cacheItemPool = $this->getCacheItemPool();
+        $item = $cacheItemPool->getItem($key);
+        $item->set($value);
+        $item->expiresAfter($ttl);
+        return $cacheItemPool->save($item);
     }
 
     /**
@@ -70,8 +104,7 @@ class WordPressSimpleCache implements CacheInterface
      */
     public function delete($key)
     {
-        $this->validateKey($key);
-        return delete_site_transient($key);
+        return $this->getCacheItemPool()->deleteItem($key);
     }
 
     /**
@@ -81,20 +114,16 @@ class WordPressSimpleCache implements CacheInterface
      */
     public function clear()
     {
-        if (wp_using_ext_object_cache()) {
-            return wp_cache_flush();
-        }
-        // todo: implement way to clear all transients for a site
-        return false;
+        return $this->getCacheItemPool()->clear();
     }
 
     /**
      * Obtains multiple cache items by their unique keys.
      *
-     * @param array|Traversable $keys A list of keys that can obtained in a single operation.
+     * @param array|\Traversable $keys A list of keys that can obtained in a single operation.
      * @param mixed $default Default value to return for keys that do not exist.
      *
-     * @return array|Traversable A list of key => value pairs. Cache keys that do not exist or are stale will have $default as value.
+     * @return array|\Traversable A list of key => value pairs. Cache keys that do not exist or are stale will have $default as value.
      *
      * @throws \Psr\SimpleCache\InvalidArgumentException
      *   MUST be thrown if $keys is neither an array nor a Traversable,
@@ -113,8 +142,8 @@ class WordPressSimpleCache implements CacheInterface
     /**
      * Persists a set of key => value pairs in the cache, with an optional TTL.
      *
-     * @param array|Traversable $values A list of key => value pairs for a multiple-set operation.
-     * @param null|int|DateInterval $ttl Optional. The TTL value of this item. If no value is sent and
+     * @param array|\Traversable $values A list of key => value pairs for a multiple-set operation.
+     * @param null|int|\DateInterval $ttl Optional. The TTL value of this item. If no value is sent and
      *                                      the driver supports TTL then the library may set a default value
      *                                      for it or let the driver take care of that.
      *
@@ -137,7 +166,7 @@ class WordPressSimpleCache implements CacheInterface
     /**
      * Deletes multiple cache items in a single operation.
      *
-     * @param array|Traversable $keys A list of string-based keys to be deleted.
+     * @param array|\Traversable $keys A list of string-based keys to be deleted.
      *
      * @return bool True if the items were successfully removed. False if there was an error.
      *
@@ -172,28 +201,7 @@ class WordPressSimpleCache implements CacheInterface
      */
     public function has($key)
     {
-        $this->validateKey($key);
-        return get_transient($key) !== false;
-    }
-
-    /**
-     * Make sure key is valid
-     *
-     * @param mixed $key
-     */
-    protected function validateKey($key)
-    {
-        if (!is_string($key)) {
-            throw new InvalidArgumentException('$key must a string.');
-        }
-
-        if (strlen($key) > 167) {
-            throw new InvalidArgumentException('$key must be less than 168 characters.');
-        }
-
-        if (preg_match('%[{}()/\\\\@:]%', $key)) {
-            throw new InvalidArgumentException('$key must not contain characters "{}()/\@:".');
-        }
+        return $this->getCacheItemPool()->hasItem($key);
     }
 
     /**
@@ -203,7 +211,7 @@ class WordPressSimpleCache implements CacheInterface
      */
     protected function validateIterator($keys)
     {
-        if (!is_array($keys) && !($keys instanceof Traversable)) {
+        if (!is_array($keys) && !($keys instanceof \Traversable)) {
             throw new InvalidArgumentException('$keys must be an array or traversable.');
         }
     }
