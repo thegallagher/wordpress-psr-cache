@@ -161,7 +161,13 @@ class CacheItemPool implements CacheItemPoolInterface
             $ttl = $expiration->getTimestamp() - $now->getTimestamp();
         }
 
-        return set_site_transient($item->getKey(), serialize($item->get()), $ttl);
+        try {
+            $value = serialize($item->get());
+        } catch (\Exception $e) {
+            return false;
+        }
+
+        return set_site_transient($item->getKey(), $value, $ttl);
     }
 
     /**

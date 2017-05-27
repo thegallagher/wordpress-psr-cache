@@ -171,10 +171,22 @@ class CacheItem implements CacheItemInterface
      */
     protected function fetchTransient()
     {
-        if ($this->isHit === null) {
-            $value = get_site_transient($this->getKey());
-            $this->isHit = $value !== false;
-            $this->value = $this->isHit ? unserialize($value) : null;
+        if ($this->isHit !== null) {
+            return;
         }
+
+        $serialized = get_site_transient($this->getKey());
+        $this->isHit = $serialized !== false;
+        if (!$this->isHit) {
+            return;
+        }
+
+        $value = unserialize($serialized);
+        $this->isHit = $value !== false || $serialized === serialize(false);
+        if (!$this->isHit) {
+            return;
+        }
+
+        $this->value = $value;
     }
 }
